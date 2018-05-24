@@ -1,0 +1,309 @@
+CREATE OR REPLACE PACKAGE BODY bbc_stu AS 
+
+    PROCEDURE add_stu (
+        fname           IN VARCHAR2,
+        lname           IN VARCHAR2,
+        street          IN VARCHAR2,
+        city            IN VARCHAR2,
+        province        IN VARCHAR2,
+        zip             IN VARCHAR2,
+        email           IN VARCHAR2,
+        mobile          IN VARCHAR2,
+        dob             IN VARCHAR2,
+        father_fname    IN VARCHAR2,
+        father_lname    IN VARCHAR2,
+        --f_relation      IN VARCHAR2,
+        father_email    IN VARCHAR2,
+        father_mobile   IN VARCHAR2,
+        mother_fname    IN VARCHAR2,
+        mother_lname    IN VARCHAR2,
+        --m_relation      IN VARCHAR2,
+        mother_email    IN VARCHAR2,
+        mother_mobile   IN VARCHAR2,
+        product1        IN VARCHAR2,
+        stu_num         OUT NUMBER
+    ) IS
+
+        v_father_rel   VARCHAR2(10) := 'Father';
+        v_mother_rel   VARCHAR2(10) := 'Mother';
+        v_cnt          NUMBER := 0;
+        v_stu_num      student.stu_num%TYPE;
+        v_stu_num_p    student.stu_num%TYPE;
+        v_product      VARCHAR2(50) := product1;--|| ',';
+        v_pos          NUMBER(10,0) := 0;
+        CURSOR parent_add_after IS SELECT
+            stu_num
+                                   FROM
+            parents
+                                   WHERE
+            par_mob = mobile;
+
+    BEGIN
+        BEGIN
+            SELECT
+                COUNT(1)
+            INTO
+                v_cnt
+            FROM
+                student
+            WHERE
+                stu_mobile = mobile;
+
+        EXCEPTION
+            WHEN no_data_found THEN
+                v_cnt := 0;
+        END;
+
+        IF
+            v_cnt = 0
+        THEN
+            SELECT
+                nvl(MAX(stu_num) + 1,COUNT(1) + 1)
+            INTO
+                v_stu_num
+            FROM
+                student;
+
+            dbms_output.put_line('1');
+            INSERT INTO student VALUES (
+                v_stu_num,
+                fname,
+                lname,
+                street,
+                city,
+                province,
+                zip,
+                email,
+                TO_DATE(dob,'YYYY-MM-DD'),
+                SYSDATE,
+                to_number(mobile)
+            );
+
+            dbms_output.put_line('2');
+            IF
+                father_fname IS NOT NULL AND father_mobile IS NOT NULL
+            THEN
+                INSERT INTO parents VALUES (
+                    v_stu_num,
+                    father_fname,
+                    father_lname,
+                    v_father_rel,
+                    father_email,
+                    father_mobile
+                );
+
+                BEGIN
+                    SELECT
+                        stu_num
+                    INTO
+                        v_stu_num_p
+                    FROM
+                        student
+                    WHERE
+                        stu_mobile = father_mobile;
+
+                    INSERT INTO mto_par_stu_id VALUES (
+                        v_stu_num,
+                        v_stu_num_p
+                    );
+
+                EXCEPTION
+                    WHEN no_data_found THEN
+                        v_stu_num_p := NULL;
+                END;
+
+            END IF;
+
+            IF
+                mother_fname IS NOT NULL AND mother_mobile IS NOT NULL
+            THEN
+                INSERT INTO parents VALUES (
+                    v_stu_num,
+                    mother_fname,
+                    mother_lname,
+                    v_mother_rel,
+                    mother_email,
+                    mother_mobile
+                );
+
+                BEGIN
+                    SELECT
+                        stu_num
+                    INTO
+                        v_stu_num_p
+                    FROM
+                        student
+                    WHERE
+                        stu_mobile = mother_mobile;
+
+                    INSERT INTO mto_par_stu_id VALUES (
+                        v_stu_num,
+                        v_stu_num_p
+                    );
+
+                EXCEPTION
+                    WHEN no_data_found THEN
+                        v_stu_num_p := NULL;
+                END;
+
+            END IF;
+
+            LOOP
+                v_pos := instr(v_product,',');
+                IF
+                    substr(v_product,0,v_pos - 1) = 'Membership'
+                THEN
+                    INSERT INTO payment_info VALUES (
+                        v_stu_num,
+                        'Membership',
+                        100,
+                        SYSDATE
+                    );
+
+                END IF;
+
+                IF
+                    substr(v_product,0,v_pos - 1) = 'Dress'
+                THEN
+                    INSERT INTO payment_info VALUES (
+                        v_stu_num,
+                        'Dress',
+                        140,
+                        SYSDATE
+                    );
+
+                END IF;
+
+                IF
+                    substr(v_product,0,v_pos - 1) = 'Test'
+                THEN
+                    INSERT INTO payment_info VALUES (
+                        v_stu_num,
+                        'Test',
+                        90,
+                        SYSDATE
+                    );
+
+                END IF;
+
+                v_product := substr(v_product,v_pos + 1);
+                EXIT WHEN v_product IS NULL;
+            END LOOP;
+
+            INSERT INTO student_rank VALUES (
+                v_stu_num,
+                1,
+                SYSDATE
+            );
+
+--           begin
+
+            FOR cv_parent_add_after IN parent_add_after LOOP
+                INSERT INTO mto_par_stu_id VALUES (
+                    cv_parent_add_after.stu_num,
+                    v_stu_num
+                );
+
+            END LOOP;
+--            end;
+
+            stu_num := v_stu_num;
+            COMMIT;
+        ELSE
+            raise_application_error(-20001,'Student already exist with this mobile number');
+        END IF;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            raise_application_error(-20002,'An error was encountered - '
+            || sqlcode
+            || ' -ERROR- '
+            || sqlerrm);
+    END;
+
+
+    PROCEDURE add_att (
+        p_stu_num    NUMBER,
+        p_c_id       NUMBER,
+        p_att_date   VARCHAR2
+    )
+        AS
+    BEGIN
+        IF
+            p_stu_num IS NOT NULL AND p_c_id IS NOT NULL AND p_att_date IS NOT NULL
+        THEN
+            INSERT INTO attendance VALUES (
+                p_stu_num,
+                p_c_id,
+                TO_DATE(p_att_date,'YYYY-MM-DD')
+            );
+
+        ELSE
+            raise_application_error(-20003,'Attendance can not be added. Give all details..');
+        END IF;
+    END;
+
+    PROCEDURE add_rank (
+        p_colour VARCHAR2
+    ) AS
+        v_color   NUMBER;
+    BEGIN
+        SELECT
+            COUNT(rank_color)
+        INTO
+            v_color
+        FROM
+            rank
+        WHERE
+            lower(rank_color) = lower(p_colour);
+
+        IF
+            v_color = 0
+        THEN
+            INSERT INTO rank VALUES (
+                (
+                    SELECT
+                        MAX(rank_id) + 1
+                    FROM
+                        rank
+                ),
+                p_colour
+            );
+
+        END IF;
+
+    EXCEPTION
+        WHEN no_data_found THEN
+            raise_application_error(-20004,p_colour
+            || ' already exists...');
+    END;
+
+    PROCEDURE add_promo (
+        p_stu_num IN NUMBER,
+        a_date DATE
+    ) AS
+        v_rank_id   NUMBER;
+    BEGIN
+        SELECT
+            MAX(rank_id) + 1
+        INTO
+            v_rank_id
+        FROM
+            student_rank
+        WHERE
+            stu_num = p_stu_num;
+
+        INSERT INTO student_rank VALUES (
+            p_stu_num,
+            v_rank_id,
+            TO_DATE(a_date,'YYYY-MM-DD')
+        );
+
+    EXCEPTION
+        WHEN no_data_found THEN
+            raise_application_error(-20005,p_stu_num
+            || ' already exists...');
+    END;
+
+END bbc_stu;
+/
